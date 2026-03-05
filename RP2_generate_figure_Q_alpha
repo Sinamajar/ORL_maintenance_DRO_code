@@ -1,0 +1,92 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Jul 28 10:52:50 2025
+
+@author: Sina Shahri Majarshin
+"""
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import minimize_scalar
+from tabulate import tabulate
+
+# Input parameters
+mu = 100  # Mean lifetime (weeks)
+c_p = 500  # Preventive replacement cost
+c_f = 6000  # Failure replacement cost
+sigmas = np.linspace(1,48,12)
+#sigmas = np.array([5, 10, 15, 20, 25, 30, 35, 40, 45, 45.5, 45.8, 45.83, 45.833, 45.8331,45.8332,45.8334])
+
+# Initialize plot
+plt.figure(figsize=(10, 6))
+colors = plt.cm.viridis(np.linspace(0, 1, len(sigmas)))
+results = []
+
+for i, sigma in enumerate(sigmas):
+    # Compute threshold and ratio
+    threshold = 1 - c_p / c_f
+    ratio = 2 * sigma / mu
+
+    # Check boundary condition
+    if np.isclose(ratio, threshold, rtol=1e-6) or ratio > threshold:
+        results.append([sigma, f"{ratio:.4f}", f"{threshold:.4f}", "N/A", "N/A", "Replace upon failure"])
+        continue
+
+    # Compute alpha interval
+    discriminant = (1 - c_p / c_f) ** 2 - 4 * (sigma ** 2) / (mu ** 2)
+    if discriminant <= 0:
+        results.append([sigma, f"{ratio:.4f}", f"{threshold:.4f}", "N/A", "N/A", "Invalid α interval"])
+        continue
+
+    sqrt_discriminant = np.sqrt(discriminant)
+    alpha1 = 0.5 * (1 + c_p / c_f - sqrt_discriminant)
+    alpha2 = 0.5 * (1 + c_p / c_f + sqrt_discriminant)
+
+    # Define Q(alpha)
+    def Q(alpha):
+        try:
+            denom_inner = mu * (1 - alpha) + (sigma ** 2) / (mu * (1 - alpha))
+            if np.isclose(denom_inner, 0, atol=1e-8) or denom_inner <= 0:
+                return np.inf
+            numerator = c_f / (alpha * mu)
+            subtrahend = (c_f - c_p) * ((1 - alpha) / alpha) / denom_inner
+            return numerator - subtrahend
+        except (ZeroDivisionError, OverflowError):
+            return np.inf
+
+    # Evaluate Q(alpha) for plotting
+    alphas = np.linspace(alpha1 + 1e-4, alpha2 - 1e-4, 500)
+    Q_vals = np.array([Q(a) for a in alphas])
+    valid_mask = np.isfinite(Q_vals)
+
+    # Plot Q(alpha)
+    plt.plot(alphas[valid_mask], Q_vals[valid_mask], label=f"σ = {sigma:.1f}", color=colors[i])
+
+    # Find optimal alpha
+    result = minimize_scalar(Q, bounds=(alpha1, alpha2), method='bounded')
+    if result.success:
+        alpha_star = result.x
+        Q_star = result.fun
+        T_star = mu * alpha_star
+        results.append([sigma, f"{ratio:.4f}", f"{threshold:.4f}", f"{alpha_star:.4f}", f"{Q_star:.4f}", f"{T_star:.4f}"])
+        # Annotate optimal point with larger font
+        plt.plot(alpha_star, Q_star, 'o', color=colors[i], markersize=5)
+        plt.annotate(f"α* = {alpha_star:.2f}", (alpha_star, Q_star), xytext=(5, 5), 
+                     textcoords='offset points', fontsize=12)  # Larger annotation font
+
+# Finalize plot
+plt.title("Q(α) for Different Values of σ", fontsize=14)  # Larger title font
+plt.xlabel("α (where T = μα)", fontsize=12)  # Larger x-axis label font
+plt.ylabel("Q(α)", fontsize=12)  # Larger y-axis label font
+plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=10)  # Larger legend font
+plt.grid(True)
+plt.tight_layout()
+plt.savefig("Q_alpha_multisigma.png", format='png', dpi=600)
+# Uncomment to display interactively
+plt.show()
+plt.close()
+
+# Print tabulated results
+headers = ["σ", "2σ/μ", "Threshold", "α*", "Q(α*)", "T*"]
+print("\nOptimization Results:")
+print(tabulate(results, headers=headers, tablefmt="grid"))
+
